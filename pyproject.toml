@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "copilot-sessions"
+version = "2.4.0"
+description = "A terminal application for your GitHub Copilot CLI sessions — list, search, inspect and resume."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [{ name = "s-maharajan" }]
+keywords = ["github-copilot", "cli", "sessions", "terminal", "tui"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: MacOS :: MacOS X",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Software Development",
+    "Topic :: Utilities",
+]
+dependencies = []  # zero runtime dependencies — stdlib only
+
+[project.scripts]
+cs = "cs.cli:run"
+
+[project.urls]
+Homepage = "https://github.com/s-maharajan/copilot-sessions"
+Documentation = "https://github.com/s-maharajan/copilot-sessions#readme"
+Source = "https://github.com/s-maharajan/copilot-sessions"
+Issues = "https://github.com/s-maharajan/copilot-sessions/issues"
+Changelog = "https://github.com/s-maharajan/copilot-sessions/blob/main/CHANGELOG.md"
+
+[tool.setuptools.packages.find]
+include = ["cs*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
