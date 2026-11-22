@@ -29,6 +29,27 @@ needs nothing beyond Python itself.
 
 ---
 
+## 📊 Status
+
+Working today, on `main`:
+
+| Area | State |
+| --- | --- |
+| Terminal app | Working — the curses home screen, every view, the interactive listing, the day dashboard |
+| Store access | Read-only (`mode=ro` on the SQLite URI). cs never writes to it. |
+| Schema drift | Detected and reported, never fatal — a missing column is a missing answer, not a broken query |
+| Search | Full text across turns and checkpoints, with ranking and snippets; falls back to scanning `turns` when there is no `search_index` |
+| Audit | Credentials in turns, checkpoints and sensitive paths, masked at the render edge |
+| Event logs | Read-only, reduced to counts, names and timestamps, cached as a digest — never cached verbatim |
+| Network | None. There is no network code in the package. |
+| Python | 3.10 or newer; 3.10 and 3.13 are exercised in CI |
+| Runtime dependencies | None — standard library only |
+| Tests | 765, all passing |
+| Lint | `ruff` 0.15.22, pinned in CI and not a project dependency |
+| E2E | None. The behaviour is covered by unit tests against a synthetic store. |
+
+---
+
 ## 🖥️ Run it with no arguments and it is an app
 
 ```
@@ -368,6 +389,37 @@ your `PATH` is shadowing it — `which -a cs` will show you what.
 
 ---
 
+## 🧰 What cs reads
+
+Nothing but the environment, the store, and the files around them.
+
+| | |
+|---|---|
+| **Python** | 3.10 or newer |
+| **Runtime dependencies** | None — the standard library only |
+| **The store** | Copilot CLI's session store, opened read-only |
+| **The event logs** | Copilot's per-session `events.jsonl`, streamed read-only |
+
+| Variable | Effect |
+|---|---|
+| `COPILOT_HOME` | Where the session store and `session-state/` live. Defaults to `~/.copilot`. |
+| `CS_CONFIG_HOME` | Where cs keeps its own settings. Defaults to `$XDG_CONFIG_HOME/cs`, else `~/.config/cs`. It is never written inside `COPILOT_HOME`. |
+| `XDG_CONFIG_HOME` | The parent of the default config directory. |
+| `XDG_CACHE_HOME` | Where the event digest and the asset counts are cached. Defaults to `~/.cache/cs`. |
+| `PAGER` | The pager for a long report. Defaults to `less`, with `-R -F -X`. |
+| `COLUMNS` | The terminal width. cs reads the real terminal size and caps the layout at 96 columns. |
+| `CS_THEME` | The theme for this run, overriding the saved one. |
+| `CS_GLYPHS` | `ascii` swaps every emoji for a plain marker, for terminals that cannot draw them. |
+| `CS_MOTION` | `off` keeps every screen still — no animation, no count-up. |
+| `CS_REDACT` | `0` shows raw text instead of masking. It is your own machine; the default is `1`. |
+| `CS_WHY` | `1` shows the lessons every time, for as long as they help. `--why` does the same for one command. |
+| `TERM` | `dumb` suppresses colour at import time. |
+
+cs writes to exactly two places, both outside the store: the settings file and the
+digest cache. `$COPILOT_HOME/.cs-ignore` is read, never written.
+
+---
+
 ## 🚀 Quick start
 
 ```bash
@@ -430,16 +482,96 @@ problem privately — is in [SECURITY.md](SECURITY.md).
 
 ## 🧑‍💻 Development
 
+Two commands, and they are exactly what CI runs:
+
 ```bash
-python -m unittest discover -s tests    # synthetic store — never touches real data
-ruff check cs tests                     # lint · these two are exactly what CI runs
-python3 docs/img/make_screens.py        # regenerate the screenshots above
+ruff check cs tests                     # lint · ruff 0.15.22, installed with pipx
+python -m unittest discover -s tests    # 765 tests · synthetic store, never touches real data
+```
+
+`ruff` is **not** a project dependency — there are no runtime dependencies and no
+development dependencies either. CI installs it separately with
+`pipx install 'ruff==0.15.22'`, so the pin lives in the workflow, not in
+`pyproject.toml`. Install it the same way locally:
+
+```bash
+pipx install 'ruff==0.15.22'
+```
+
+The tests are `unittest`, not pytest. Run one file, or one test:
+
+```bash
+python -m unittest tests.test_views -v
+python -m unittest tests.test_views.ViewsTest.test_something -v
 ```
 
 Tests build a throwaway store under a temporary `COPILOT_HOME`, so they run
 identically on any machine and in CI. The curses UI is tested through a fake
 screen that records every frame, so keys, mouse reports and redraws are
 asserted without a terminal.
+
+The screenshots in this README are regenerated with:
+
+```bash
+python3 docs/img/make_screens.py
+```
+
+That script drives the real UI against a synthetic store in a pty, and sets
+`PAGER=cat` so a long report is not handed to `less`.
+
+---
+
+## 🏗️ How it works
+
+`cs` is one package over one SQLite file. There is no server, no client, no
+daemon and no plugin system.
+
+```
+cs/
+├── __main__.py     the entry point — `python -m cs`
+├── cli/            one module per command family
+├── db.py           the read-only store: queries, schema drift, capabilities
+├── events.py       the per-session event logs, reduced to a digest
+├── redact.py       credential masking, at the render edge
+├── ui.py           the curses rendering layer, themes, motion, width
+└── context.py      the instructions, skills, agents and hooks around you
+```
+
+The store is opened with `mode=ro` on the SQLite URI. Every table cs does not
+need is optional: `db.capabilities()` reports what the store can answer, and a
+missing column costs a feature rather than raising. The long version — the
+request flow, the search pipeline, the masking rules and the degradation
+matrix — is in **[ARCHITECTURE.md](ARCHITECTURE.md)**.
+
+### Repository layout
+
+```
+copilot-sessions/
+├── bin/cs              the launcher on your PATH
+├── cs/                 the package
+│   ├── cli/            one module per command family
+│   └── …               db, events, redact, ui, context
+├── tests/              765 unittest tests, no fixture directory
+├── docs/               GUIDE.md, the screenshots, the deck
+├── install.sh          symlinks bin/cs into ~/.local/bin
+└── pyproject.toml      packaging and the ruff configuration
+```
+
+---
+
+## 🚦 CI
+
+| Workflow | Trigger | What it does |
+|---|---|---|
+| `ci.yml` | push to `main`, pull requests, manual | `ruff check cs tests`, then `python -m unittest discover -s tests -v`, on Python 3.10 and 3.13. A separate job installs gitleaks 8.30.1 from its checksummed release asset and scans the whole history for committed credentials. A third calls the reusable Snyk workflow. |
+| `codeql.yml` | push to `main`, pull requests, Mondays 08:00 UTC, manual | CodeQL for `python` and `actions`. |
+| `sast.yml` | push to `main`, pull requests, manual | Semgrep 1.186.0 with the registry rules, report-only (`continue-on-error`) against the pre-existing findings. |
+| `dependency-audit.yml` | push to `main`, pull requests, Mondays 07:00 UTC, manual | OSV-Scanner over the resolved dependency set. |
+| `snyk.yml` | called by CI, Mondays 06:23 UTC, manual | Snyk open-source and code scans, plus `snyk monitor`. Skipped with a notice when `SNYK_TOKEN` is absent. |
+
+Every action is pinned to a commit SHA, and the workflows run with read-only
+permissions. The test step runs `if: always()`, so a lint failure can never
+hide a test failure.
 
 ---
 
@@ -449,7 +581,10 @@ asserted without a terminal.
 |---|---|
 | **[docs/GUIDE.md](docs/GUIDE.md)** | Every view, every key, and what each report is for |
 | **[ARCHITECTURE.md](ARCHITECTURE.md)** | How the modules split, and why the awkward parts are awkward |
+| **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)** | The development loop: running the tests, adding a command, regenerating the screenshots |
+| **[docs/OPERATIONS.md](docs/OPERATIONS.md)** | Installing, configuring and running cs on a machine; the store, the config and the cache |
 | **[CONTRIBUTING.md](CONTRIBUTING.md)** | What needs a test, and the two commands CI runs |
+| **[AGENTS.md](AGENTS.md)** | The traps that silently break this repo, for agents and for people |
 | **[CHANGELOG.md](CHANGELOG.md)** | What changed, and when |
 | **[SECURITY.md](SECURITY.md)** | The threat model, and how to report a vulnerability privately |
 | **[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)** | Contributor Covenant 2.1 |

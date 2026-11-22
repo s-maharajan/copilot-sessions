@@ -2,17 +2,25 @@
 
 How `cs` is put together, and why the awkward parts are the way they are.
 For usage see [README.md](README.md); for the state of the work and the
-decisions behind recent changes see [docs/HANDOVER.md](docs/HANDOVER.md).
+decisions behind recent changes see [docs/HANDOVER.md](docs/HANDOVER.md);
+for the day-to-day loop see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md); for
+installing and running it see [docs/OPERATIONS.md](docs/OPERATIONS.md).
 
 - [Shape of the code](#shape-of-the-code)
 - [The data it reads](#the-data-it-reads)
 - [Request flow](#request-flow)
 - [Search pipeline](#search-pipeline)
+- [Building the session page](#building-the-session-page)
+- [The home screen](#the-home-screen)
+- [The day dashboard](#the-day-dashboard)
 - [The interactive listing](#the-interactive-listing)
 - [Input handling](#input-handling)
 - [Degrading gracefully](#degrading-gracefully)
 - [Presentation layer](#presentation-layer)
 - [Masking credentials](#masking-credentials)
+- [Inferring what the store does not record](#inferring-what-the-store-does-not-record)
+- [Inferring asset usage](#inferring-asset-usage)
+- [Configuration and environment](#configuration-and-environment)
 - [Testing approach](#testing-approach)
 
 ---
@@ -1066,6 +1074,51 @@ reads it on start and on each refresh (a few `PRAGMA table_info` calls, no
 log reads) and shows `schema changed · cs doctor`; `cs doctor` lists the
 difference. A store without `schema_version` is treated as an older Copilot,
 not as drift.
+
+---
+
+## Configuration and environment
+
+`cs` has no configuration file of its own to edit and no command-line
+preferences that persist. What it reads, and where it writes, is the whole
+contract.
+
+### Where things live
+
+| What | Where | Written by cs? |
+|---|---|---|
+| The session store | `$COPILOT_HOME/session-store.db`, default `~/.copilot` | **Never** — opened `mode=ro` |
+| The per-session event logs | `$COPILOT_HOME/session-state/<id>/events.jsonl` | Never — read-only, counted |
+| The settings file | `$CS_CONFIG_HOME/cs/settings.json`, default `~/.config/cs/settings.json` | Yes — theme, pins, notes, daily budget |
+| The `#N` shortcuts | `~/.config/cs/.cs-last-index` | Yes |
+| The event digest | `$XDG_CACHE_HOME/cs/events-digest.json`, default `~/.cache/cs` | Yes — counts and timestamps only |
+| The asset counts | `$XDG_CACHE_HOME/cs/asset-counts.json` | Yes |
+| The ignore list | `$COPILOT_HOME/.cs-ignore` | **Never** — read only |
+
+Nothing cs writes is ever placed inside `COPILOT_HOME`. That directory belongs
+to Copilot, and cs has no business writing next to the store it only reads.
+
+### The environment
+
+| Variable | Read by | Effect |
+|---|---|---|
+| `COPILOT_HOME` | `db.py` | The store's home. `default_db_path()` returns `$COPILOT_HOME/session-store.db`, or `~/.copilot/session-store.db`. |
+| `CS_CONFIG_HOME` | `ui.py` | The base of the settings directory. Falls back to `$XDG_CONFIG_HOME`, then `~/.config`. |
+| `XDG_CONFIG_HOME` | `ui.py` | The parent of the default config directory. |
+| `XDG_CACHE_HOME` | `events.py`, `db.py` | The base of the cache directory. Falls back to `~/.cache`. |
+| `PAGER` | `cli/_common.py` | The pager for a long report. Defaults to `less`, with `-R -F -X`, and `--mouse --wheel-lines=3` when the installed `less` is new enough. |
+| `COLUMNS` | `shutil.get_terminal_size()` | The terminal width. The layout caps at 96 columns and every table has to hold its shape below that. |
+| `CS_THEME` | `ui.py` | The theme for this run, overriding the saved one. |
+| `CS_GLYPHS` | `ui.py` | `ascii` swaps every emoji for a plain marker. |
+| `CS_MOTION` | `ui.py` | `off` keeps every screen still. |
+| `CS_REDACT` | `redact.py` | `0` shows raw text instead of masking. The default is `1`. |
+| `CS_WHY` | `cli/dispatch.py` | `1` shows the lessons every time. `--why` does the same for one command. |
+| `TERM` | `ui.py` | `dumb` suppresses colour at import time, before anything is drawn. |
+
+The environment is read at import time in several cases — the theme, the glyph
+mode, the motion setting and the colour decision — which is why
+`CS_THEME=...` has to be set before the process starts, not set inside a
+session.
 
 ---
 
